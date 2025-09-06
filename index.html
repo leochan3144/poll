@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polls App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+            color: #2d3748;
+        }
+        .container {
+            max-width: 768px;
+            margin: auto;
+        }
+        .card {
+            background-color: #ffffff;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+        }
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 9999px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background-color: #4a5568;
+            color: #ffffff;
+        }
+        .btn-primary:hover {
+            background-color: #2d3748;
+        }
+        .btn-secondary {
+            background-color: #e2e8f0;
+            color: #4a5568;
+        }
+        .btn-secondary:hover {
+            background-color: #cbd5e0;
+        }
+        .input-group input, .input-group button {
+            border-radius: 9999px;
+        }
+        .input-field {
+            padding: 0.5rem 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 9999px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+    <div class="container px-4 py-8">
+        <div id="loading-spinner" class="text-center py-10" style="display: none;">
+            <svg class="animate-spin h-10 w-10 text-gray-800 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-4 text-gray-600">Loading polls...</p>
+        </div>
+
+        <div id="app" class="space-y-8" style="display: none;">
+            <div class="card space-y-4">
+                <h1 class="text-3xl font-bold text-center">Polls App</h1>
+                <p class="text-center text-sm text-gray-500">Your user ID: <span id="user-id" class="font-mono break-all text-sm"></span></p>
+                <!-- Poll Creation Form -->
+                <div class="space-y-4">
+                    <h2 class="text-2xl font-bold">Create a New Poll</h2>
+                    <input type="text" id="poll-question" placeholder="Enter your poll question..." class="input-field w-full px-4 py-2 border-2 border-gray-300 focus:outline-none focus:border-indigo-500 transition-colors">
+                    <div id="options-container" class="space-y-2">
+                        <div class="flex items-center space-x-2">
+                            <input type="text" placeholder="Option 1" class="option-input input-field flex-grow">
+                            <button onclick="addOption()" class="btn btn-secondary px-4 py-2 rounded-full">+</button>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <input type="text" placeholder="Option 2" class="option-input input-field flex-grow">
+                            <button onclick="removeOption(this)" class="btn btn-secondary px-4 py-2 rounded-full">-</button>
+                        </div>
+                    </div>
+                    <button id="create-poll-btn" class="btn btn-primary w-full mt-4">Create Poll</button>
+                </div>
+            </div>
+
+            <!-- Existing Polls Section -->
+            <div class="card">
+                <h2 class="text-2xl font-bold mb-4">Live Polls</h2>
+                <div id="polls-list" class="space-y-8">
+                    <!-- Polls will be dynamically inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmation-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center hidden">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-80">
+            <p id="modal-message" class="text-lg font-semibold mb-4 text-center"></p>
+            <div class="flex justify-end space-x-2">
+                <button id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
+                <button id="modal-confirm-btn" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app;
+        let db;
+        let auth;
+        let userId;
+
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const appContainer = document.getElementById('app');
+        const pollsList = document.getElementById('polls-list');
+        const pollQuestionInput = document.getElementById('poll-question');
+        const optionsContainer = document.getElementById('options-container');
+        const createPollBtn = document.getElementById('create-poll-btn');
+        const userIdSpan = document.getElementById('user-id');
+
+        // Modal elements
+        const confirmationModal = document.getElementById('confirmation-modal');
+        const modalMessage = document.getElementById('modal-message');
+        const modalConfirmBtn = document.getElementById('modal-confirm-btn');
+        const modalCancelBtn = document.getElementById('modal-cancel-btn');
+
+        // Show modal and return a promise
+        function showModal(message) {
+            return new Promise((resolve) => {
+                modalMessage.textContent = message;
+                confirmationModal.classList.remove('hidden');
+
+                const onConfirm = () => {
+                    confirmationModal.classList.add('hidden');
+                    resolve(true);
+                    modalConfirmBtn.removeEventListener('click', onConfirm);
+                    modalCancelBtn.removeEventListener('click', onCancel);
+                };
+                const onCancel = () => {
+                    confirmationModal.classList.add('hidden');
+                    resolve(false);
+                    modalConfirmBtn.removeEventListener('click', onConfirm);
+                    modalCancelBtn.removeEventListener('click', onCancel);
+                };
+
+                modalConfirmBtn.addEventListener('click', onConfirm);
+                modalCancelBtn.addEventListener('click', onCancel);
+            });
+        }
+
+        // --- Firebase Initialization and Auth ---
+        window.onload = async function() {
+            if (Object.keys(firebaseConfig).length > 0) {
+                loadingSpinner.style.display = 'block';
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('debug');
+
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    userId = auth.currentUser?.uid || crypto.randomUUID();
+                    userIdSpan.textContent = userId;
+                    appContainer.style.display = 'block';
+                    loadingSpinner.style.display = 'none';
+
+                    // Start listening for polls
+                    listenForPolls();
+                } catch (error) {
+                    console.error("Error during Firebase auth:", error);
+                    loadingSpinner.style.display = 'none';
+                    appContainer.style.display = 'block';
+                    pollsList.innerHTML = `<p class="text-center text-red-500">Failed to authenticate. Please check the console for details.</p>`;
+                }
+            } else {
+                appContainer.style.display = 'block';
+                pollsList.innerHTML = `<p class="text-center text-gray-500">Firebase config is missing. Please provide it to enable data persistence.</p>`;
+            }
+        };
+
+        // --- Firestore Operations ---
+        const pollsCollectionPath = `artifacts/${appId}/public/data/polls`;
+
+        function listenForPolls() {
+            const pollsRef = collection(db, pollsCollectionPath);
+            onSnapshot(pollsRef, (snapshot) => {
+                pollsList.innerHTML = '';
+                if (snapshot.empty) {
+                    pollsList.innerHTML = `<p class="text-center text-gray-500">No polls yet. Create one above!</p>`;
+                }
+                snapshot.forEach(doc => {
+                    const pollData = doc.data();
+                    renderPoll(doc.id, pollData);
+                });
+            }, (error) => {
+                console.error("Error fetching polls: ", error);
+                pollsList.innerHTML = `<p class="text-center text-red-500">Error fetching polls. Please check the console.</p>`;
+            });
+        }
+
+        async function createPoll() {
+            const question = pollQuestionInput.value.trim();
+            const optionInputs = document.querySelectorAll('.option-input');
+            const options = {};
+            let hasValidOption = false;
+
+            optionInputs.forEach((input, index) => {
+                const value = input.value.trim();
+                if (value) {
+                    options[value] = 0;
+                    hasValidOption = true;
+                }
+            });
+
+            if (!question || !hasValidOption) {
+                showModal('Please enter a question and at least one valid option.');
+                return;
+            }
+
+            try {
+                await addDoc(collection(db, pollsCollectionPath), {
+                    question,
+                    options,
+                    createdAt: new Date().toISOString()
+                });
+                pollQuestionInput.value = '';
+                optionsContainer.innerHTML = `
+                    <div class="flex items-center space-x-2">
+                        <input type="text" placeholder="Option 1" class="option-input input-field flex-grow">
+                        <button onclick="addOption()" class="btn btn-secondary px-4 py-2 rounded-full">+</button>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <input type="text" placeholder="Option 2" class="option-input input-field flex-grow">
+                        <button onclick="removeOption(this)" class="btn btn-secondary px-4 py-2 rounded-full">-</button>
+                    </div>
+                `;
+            } catch (error) {
+                console.error("Error adding poll: ", error);
+                showModal('Failed to create poll. See console for details.');
+            }
+        }
+
+        async function voteOnPoll(pollId, optionKey) {
+            try {
+                const pollRef = doc(db, pollsCollectionPath, pollId);
+                const updateObject = {};
+                // Increment the vote count for the selected option
+                updateObject[`options.${optionKey}`] = firebase.firestore.FieldValue.increment(1);
+                // The above line requires FieldValue which is not available, so we'll do a read-and-update.
+                // A better approach would be to use a transaction.
+                // For simplicity, we'll get the doc and update it manually.
+                const docSnap = await getDoc(pollRef);
+                if (docSnap.exists()) {
+                    const currentOptions = docSnap.data().options || {};
+                    const currentVoteCount = currentOptions[optionKey] || 0;
+                    currentOptions[optionKey] = currentVoteCount + 1;
+                    await updateDoc(pollRef, { options: currentOptions });
+                }
+            } catch (error) {
+                console.error("Error voting on poll: ", error);
+                showModal('Failed to cast vote. See console for details.');
+            }
+        }
+
+        // --- UI Rendering and Event Handlers ---
+        function renderPoll(id, data) {
+            const pollCard = document.createElement('div');
+            pollCard.className = 'card space-y-4 border border-gray-200';
+            pollCard.innerHTML = `
+                <h3 class="text-xl font-semibold">${data.question}</h3>
+                <div class="space-y-2" id="options-${id}"></div>
+            `;
+            const optionsList = pollCard.querySelector(`#options-${id}`);
+            const options = data.options || {};
+            const totalVotes = Object.values(options).reduce((sum, count) => sum + count, 0);
+
+            for (const option in options) {
+                const voteCount = options[option];
+                const percentage = totalVotes > 0 ? ((voteCount / totalVotes) * 100).toFixed(0) : 0;
+                const optionElement = document.createElement('div');
+                optionElement.className = 'flex items-center space-x-2';
+                optionElement.innerHTML = `
+                    <button class="vote-btn flex-grow btn btn-secondary text-left px-4 py-2 rounded-full truncate" data-poll-id="${id}" data-option-key="${option}">
+                        <span class="font-medium">${option}</span>
+                    </button>
+                    <div class="w-16 text-right font-bold text-lg">${voteCount}</div>
+                `;
+                optionsList.appendChild(optionElement);
+                
+                // Add a progress bar visually representing the percentage
+                const progressBar = document.createElement('div');
+                progressBar.className = 'h-1.5 bg-gray-200 rounded-full overflow-hidden mt-1';
+                progressBar.innerHTML = `<div class="bg-indigo-500 h-full rounded-full transition-all duration-300 ease-out" style="width: ${percentage}%"></div>`;
+                optionsList.appendChild(progressBar);
+            }
+
+            pollsList.appendChild(pollCard);
+        }
+
+        // Add an option field to the creation form
+        window.addOption = function() {
+            const optionCount = optionsContainer.querySelectorAll('.option-input').length;
+            if (optionCount < 10) { // Limit options to 10
+                const newOption = document.createElement('div');
+                newOption.className = 'flex items-center space-x-2';
+                newOption.innerHTML = `
+                    <input type="text" placeholder="Option ${optionCount + 1}" class="option-input input-field flex-grow">
+                    <button onclick="removeOption(this)" class="btn btn-secondary px-4 py-2 rounded-full">-</button>
+                `;
+                optionsContainer.appendChild(newOption);
+            } else {
+                showModal('You can only add up to 10 options per poll.');
+            }
+        };
+
+        // Remove an option field from the creation form
+        window.removeOption = function(btn) {
+            const optionCount = optionsContainer.querySelectorAll('.option-input').length;
+            if (optionCount > 2) {
+                btn.parentElement.remove();
+            } else {
+                showModal('A poll must have at least two options.');
+            }
+        };
+
+        // Event listener for the "Create Poll" button
+        createPollBtn.addEventListener('click', createPoll);
+
+        // Event delegation for voting buttons
+        document.addEventListener('click', function(event) {
+            const target = event.target.closest('.vote-btn');
+            if (target) {
+                const pollId = target.dataset.pollId;
+                const optionKey = target.dataset.optionKey;
+                voteOnPoll(pollId, optionKey);
+            }
+        });
+
+    </script>
+</body>
+</html>
