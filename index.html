@@ -109,13 +109,23 @@
     <!-- Firebase -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, setLogLevel, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global variables provided by the canvas environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // IMPORTANT: Replace this entire object with your own Firebase project configuration.
+        // You can find this in your Firebase console under Project Settings > Your apps.
+        const firebaseConfig = {
+  apiKey: "AIzaSyAlCF--gLd28hrg9mPq7C24lY9O9iRJbSc",
+  authDomain: "polling3144.firebaseapp.com",
+  projectId: "polling3144",
+  storageBucket: "polling3144.firebasestorage.app",
+  messagingSenderId: "1068018430102",
+  appId: "1:1068018430102:web:7c91303d49d7dae42f92b7",
+  measurementId: "G-14QHEK1YKH"
+};
+        
+        // This app ID is used for structuring your database. It can be any string.
+        const appId = "my-public-polls-app"; 
 
         let app;
         let db;
@@ -162,7 +172,8 @@
 
         // --- Firebase Initialization and Auth ---
         window.onload = async function() {
-            if (Object.keys(firebaseConfig).length > 0) {
+            // Check if a valid Firebase config is provided
+            if (firebaseConfig.apiKey && firebaseConfig.projectId) {
                 loadingSpinner.style.display = 'block';
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
@@ -170,12 +181,9 @@
                 setLogLevel('debug');
 
                 try {
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                    } else {
-                        await signInAnonymously(auth);
-                    }
-                    userId = auth.currentUser?.uid || crypto.randomUUID();
+                    // Sign in anonymously for simplicity on a public site
+                    await signInAnonymously(auth);
+                    userId = auth.currentUser?.uid;
                     userIdSpan.textContent = userId;
                     appContainer.style.display = 'block';
                     loadingSpinner.style.display = 'none';
@@ -190,7 +198,7 @@
                 }
             } else {
                 appContainer.style.display = 'block';
-                pollsList.innerHTML = `<p class="text-center text-gray-500">Firebase config is missing. Please provide it to enable data persistence.</p>`;
+                pollsList.innerHTML = `<p class="text-center text-red-500">Firebase config is missing. Please provide it in the code to enable data persistence.</p>`;
             }
         };
 
@@ -259,12 +267,6 @@
         async function voteOnPoll(pollId, optionKey) {
             try {
                 const pollRef = doc(db, pollsCollectionPath, pollId);
-                const updateObject = {};
-                // Increment the vote count for the selected option
-                updateObject[`options.${optionKey}`] = firebase.firestore.FieldValue.increment(1);
-                // The above line requires FieldValue which is not available, so we'll do a read-and-update.
-                // A better approach would be to use a transaction.
-                // For simplicity, we'll get the doc and update it manually.
                 const docSnap = await getDoc(pollRef);
                 if (docSnap.exists()) {
                     const currentOptions = docSnap.data().options || {};
